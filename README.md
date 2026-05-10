@@ -2,6 +2,9 @@
 
 OmniTicket is a high-performance, role-based ticket management system designed for administrative task tracking and employee collaboration. It provides a seamless, real-time experience for managing support requests, technical issues, and internal tasks.
 
+<img width="1267" height="680" alt="ticket" src="https://github.com/user-attachments/assets/6766a573-7517-44ca-bd87-c51c0a0b5d98" />
+
+
 ## 🚀 Key Features
 
 - **Role-Based Access Control (RBAC):** Distinct interfaces and permissions for Admins and Employees.
@@ -37,7 +40,7 @@ To get the project running on your local machine, follow these steps:
 
 1. **Clone the Repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/mohakamran/ticket-management
    cd omniticket
    ```
 
