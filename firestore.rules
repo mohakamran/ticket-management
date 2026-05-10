@@ -1,0 +1,125 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helper Functions ---
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'mohammadkamran1515@gmail.com' ||
+        request.auth.token.email == 'admin@omniticket.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN')
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validation Helpers ---
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'name', 'email', 'role', 'createdAt']) &&
+             data.keys().size() >= 5 && data.keys().size() <= 6 &&
+             data.id == request.auth.uid &&
+             data.name is string && data.name.size() > 0 &&
+             data.email is string &&
+             data.role in ['ADMIN', 'EMPLOYEE'];
+    }
+
+    function isValidTicket(data) {
+      return data.keys().hasAll(['title', 'description', 'status', 'priority', 'createdById', 'createdAt', 'updatedAt']) &&
+             data.keys().size() >= 7 && data.keys().size() <= 8 && // assignedToId is optional
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.description is string && data.description.size() <= 2000 &&
+             data.status in ['PENDING', 'IN_PROGRESS', 'COMPLETED'] &&
+             data.priority in ['LOW', 'MEDIUM', 'HIGH'] &&
+             data.createdById is string &&
+             data.createdAt is timestamp &&
+             data.updatedAt == request.time;
+    }
+
+    function isValidComment(data) {
+      return data.keys().hasAll(['message', 'userId', 'ticketId', 'createdAt']) &&
+             data.keys().size() == 4 &&
+             data.message is string && data.message.size() > 0 && data.message.size() <= 1000 &&
+             data.userId == request.auth.uid &&
+             data.ticketId is string &&
+             data.createdAt == request.time;
+    }
+
+    // --- Collection Rules ---
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if (isAdmin() || (isOwner(userId) && incoming().role == existing().role)) && 
+                    incoming().id == existing().id &&
+                    incoming().email == existing().email &&
+                    incoming().createdAt == existing().createdAt &&
+                    isValidUser(incoming());
+    }
+
+    // Tickets collection
+    match /tickets/{ticketId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn() && (isAdmin() || resource.data.assignedToId == request.auth.uid || resource.data.createdById == request.auth.uid);
+      
+      allow create: if isSignedIn() && isValidTicket(incoming()) && incoming().createdById == request.auth.uid;
+      
+      allow update: if isSignedIn() && (
+        // Admin can update anything except immutable fields
+        (isAdmin() && isValidTicket(incoming()) && 
+         incoming().createdAt == existing().createdAt &&
+         incoming().createdById == existing().createdById) ||
+        // Employee can only update status of assigned tickets
+        (existing().assignedToId == request.auth.uid && 
+         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+         incoming().status in ['PENDING', 'IN_PROGRESS', 'COMPLETED'] &&
+         incoming().updatedAt == request.time)
+      );
+      
+      allow delete: if isAdmin();
+
+      // Nested comments
+      match /comments/{commentId} {
+        allow read: if isSignedIn(); // Any signed in user can see comments if they can see the ticket
+        allow create: if isSignedIn() && isValidComment(incoming()) && (
+          isAdmin() || existing().assignedToId == request.auth.uid
+        );
+      }
+    }
+  }
+}
